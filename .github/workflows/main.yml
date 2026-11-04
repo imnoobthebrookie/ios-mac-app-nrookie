@@ -1,0 +1,52 @@
+name: Build IPA for TrollStore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Package IPA
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Build for iPhone (Unsigned)
+        run: |
+          set -e
+          if ls *.xcworkspace 1> /dev/null 2>&1; then
+            proj=$(ls -d *.xcworkspace | head -n 1)
+            echo "Found workspace: $proj"
+            xcodebuild -workspace "$proj" -list
+            scheme=$(xcodebuild -workspace "$proj" -list | grep -A 1 "Schemes:" | tail -n 1 | xargs)
+            echo "Using scheme: $scheme"
+            xcodebuild -workspace "$proj" -scheme "$scheme" -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" build
+          else
+            proj=$(ls -d *.xcodeproj | head -n 1)
+            echo "Found project: $proj"
+            xcodebuild -project "$proj" -list
+            scheme=$(xcodebuild -project "$proj" -list | grep -A 1 "Schemes:" | tail -n 1 | xargs)
+            echo "Using scheme: $scheme"
+            xcodebuild -project "$proj" -scheme "$scheme" -sdk iphoneos -configuration Release CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGN_ENTITLEMENTS="" build
+          fi
+
+      - name: Create IPA file
+        run: |
+          mkdir -p Payload
+          app_path=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | head -n 1)
+          if [ -z "$app_path" ]; then
+            app_path=$(find build/Release-iphoneos -name "*.app" -type d | head -n 1)
+          fi
+          echo "Found app at: $app_path"
+          cp -r "$app_path" Payload/
+          zip -r app.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollStoreApp
+          path: app.ipa
