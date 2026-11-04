@@ -1,0 +1,76 @@
+name: Build IPA for TrollStore
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build & Package IPA for Real Device
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout code with Submodules
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install Dependencies
+        run: |
+          if [ -f "Gemfile" ]; then
+            bundle install
+            bundle exec pod install
+          elif [ -f "Podfile" ]; then
+            pod install
+          fi
+
+      - name: Build for Real iPhone (Unsigned)
+        run: |
+          set -e
+          
+          # Tự động xác định workspace hoặc project
+          if [ "`ls -A | grep -i \\.xcworkspace\$`" ]; then 
+            BUILD_FLAG="-workspace"
+            BUILD_TARGET="`ls -A | grep -i \\.xcworkspace\$`"
+          else 
+            BUILD_FLAG="-project"
+            BUILD_TARGET="`ls -A | grep -i \\.xcodeproj\$`"
+          fi
+          BUILD_TARGET=`echo $BUILD_TARGET | awk '{$1=$1;print}'`
+          echo "Using target: $BUILD_TARGET"
+
+          # Tự động lấy scheme đầu tiên
+          SCHEME=$(xcodebuild "$BUILD_FLAG" "$BUILD_TARGET" -list | grep -A 20 "Schemes:" | tail -n +2 | head -n 1 | xargs)
+          if [ -z "$SCHEME" ]; then
+            SCHEME="ProtonVPN"
+          fi
+          echo "Selected Scheme: $SCHEME"
+
+          # Build cho thiết bị thật (iphoneos) và không ký số (unsigned)
+          xcodebuild "$BUILD_FLAG" "$BUILD_TARGET" \
+                     -scheme "$SCHEME" \
+                     -sdk iphoneos \
+                     -configuration Release \
+                     CODE_SIGN_IDENTITY="" \
+                     CODE_SIGNING_REQUIRED=NO \
+                     CODE_SIGN_ENTITLEMENTS="" \
+                     build
+
+      - name: Create IPA file
+        run: |
+          mkdir -p Payload
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find . -name "*.app" -type d | head -n 1)
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          zip -r app.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollStoreApp
+          path: app.ipa
