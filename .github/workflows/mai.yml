@@ -1,0 +1,55 @@
+name: iOS starter workflo
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build default scheme using Simulator
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode version
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - name: Install Pods
+        run: |
+          if [ -f "Podfile" ]; then
+            pod install
+          fi
+
+      - name: Build using Workspace and Scheme
+        run: |
+          set -e
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          echo "Using workspace: $WORKSPACE"
+          
+          # Lấy scheme của ProtonVPN một cách chính xác
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | tr -d "\n" | ruby -e "require 'json'; puts JSON.parse(STDIN.gets)['workspace']['schemes'].find { |s| s.include?('VPN') } || 'ProtonVPN'")
+          echo "Selected Scheme: $SCHEME"
+
+          # Build ở chế độ Simulator với scheme đã chọn
+          xcodebuild -workspace "$WORKSPACE" \
+                     -scheme "$SCHEME" \
+                     -sdk iphonesimulator \
+                     build
+
+      - name: Package to IPA for TrollStore
+        run: |
+          mkdir -p Payload
+          APP_PATH=$(find ~/Library/Developer/Xcode/DerivedData -name "*.app" -type d | head -n 1)
+          if [ -z "$APP_PATH" ]; then
+            APP_PATH=$(find . -name "*.app" -type d | head -n 1)
+          fi
+          echo "Found app at: $APP_PATH"
+          cp -r "$APP_PATH" Payload/
+          zip -r app.ipa Payload
+
+      - name: Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrollStoreApp
+          path: app.ipa
